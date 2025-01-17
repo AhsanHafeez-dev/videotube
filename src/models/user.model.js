@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { isDebugging } from "../constants.js";
 const userSchema = new mongoose.Schema(
   {
     watchHistory: [
@@ -46,9 +47,20 @@ const userSchema = new mongoose.Schema(
       type: String,
       
     },
+    address: {
+      type:{
+        city: {type:String,default:"Karachi"},
+        state: {type:String,default:"Sindh"},
+        country: {type:String,default:"Pakistan"},
+        pinCode: {type:Number,default:new Number("05444")}
+      },
+      required: true
+    }
   },
   { timestamps: true }
 );
+
+
 
 userSchema.pre(
   "save",
@@ -64,8 +76,8 @@ userSchema.methods.isPasswordCorrect=  async function (password) {
    }
 
 
-userSchema.methods.generateAccessToken = async function () {
-  jwt.sign(
+userSchema.methods.generateAccessToken = function () {
+  return jwt.sign(
     {
       _id: this._id,
       email: this.email,
@@ -73,19 +85,20 @@ userSchema.methods.generateAccessToken = async function () {
       fullName: this.fullName,
     },
     process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: ACCESS_TOKEN_EXPIRY }
+    { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
   );
-  
 };   
 
-userSchema.methods.generateRefreshToken = async function () {
+userSchema.methods.generateRefreshToken = function () {
+
   this.refreshToken = jwt.sign(
     {
       _id: this._id,
     },
     process.env.REFRESH_TOKEN_SECRET,
-    { expiresIn: REFRESH_TOKEN_EXPIRY }
+    { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
   );
+  return this.refreshToken;
 }
 
 

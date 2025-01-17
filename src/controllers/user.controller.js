@@ -4,9 +4,33 @@ import {ApiResponse} from "../utils/ApiResponse.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import {User} from "../models/user.model.js"
 import { validateEmail, validateFullName, validatePassword, validateUsername } from "../utils/validation.js";
-import { isDebugging } from "../constants.js";
+import { isDebugging, secureCookieOptions } from "../constants.js";
+import jwt from "jsonwebtoken";
 
 
+const generateAccessAndRefreshToken = async (user) => {
+    if (isDebugging) { console.log(`generating access and refresh token for user : ${user.username}`); }
+    
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
+    
+    if (isDebugging) { console.log(`access token generated for ${user.username} : ${accessToken}`); }
+    
+    // we dont want other items in mongoose model to be saved to kicked in again
+    await user.save({ validateBeforeSave: false })
+    
+    if (isDebugging) { console.log({ accessToken, refreshToken }); }
+    return { accessToken, refreshToken };
+    
+    
+}
+
+
+
+
+
+
+// controllers
 const registerUser = asyncHandler(
     async (req, res) => {
         if (isDebugging) { console.log("started register User"); }
@@ -39,8 +63,10 @@ const registerUser = asyncHandler(
         
         const avatarLocalFilePath = req.files.avatar[0]?.path;
         if (!avatarLocalFilePath) { throw new ApiError(400, "avatar is required"); }
-        
-        const coverImageLocalFilePath = req.files.coverImage[0]?.path;
+        let coverImageLocalFilePath = "";
+        console.log("checking if");
+        if (req.files.coverImage) { console.log("got if"); coverImageLocalFilePath = req.files.coverImage[0]?.path;}
+    
         
         const avatar = await uploadToCloudinary(avatarLocalFilePath);
         if (!avatar) { throw new ApiError(500, "error in saving image to cloudinary") }
@@ -75,4 +101,112 @@ const registerUser = asyncHandler(
 }
 );
 
-export {registerUser}
+
+
+
+
+const loginUser = asyncHandler(
+    async (req, res) => {
+        if (isDebugging) { console.log("start of login controller"); console.log(req.body)}
+        // getting data
+        const { username, email, password } = req.body;
+        
+        if (isDebugging) { console.log({ username, email, password }); }
+        
+        // sanity checks
+        if (!email && !username) { throw new ApiError(400, "required fields cannot be null"); }
+
+        if (isDebugging) { console.log(`db request to fetch user with username : ${username} or email : ${email}`); }
+        // verifcation
+        const user = await User.findOne({
+            $or: [{ username }, { email }]
+        });
+        
+        if (!user) {
+            if (isDebugging) { console.log(`user not found in db`); }
+            throw new ApiError(400, "Incorrect username or password");
+
+        }
+        const validPassword = await user.isPasswordCorrect(password);
+        if (!validPassword) { throw new ApiError(400, "incorrect user credentials"); }
+        
+        const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user);
+        if (isDebugging) { console.log(accessToken); }
+        user.password = undefined;
+        if (isDebugging) { console.log("sending 200 response from login controller"); }
+        res.status(200)
+            .cookie("accessToken", accessToken, secureCookieOptions)
+            .cookie("refreshToken", refreshToken, secureCookieOptions)
+            .json(
+                new ApiResponse(200, { user: user, accessToken, refreshToken }, "successfully logged in user")
+            );
+        
+        
+    }
+);
+
+
+
+
+
+const logoutUser = asyncHandler(async (req, res) =>
+{ 
+    if (isDebugging) { console.log("starting logout controller"); }
+    req.user.refreshToken = undefined;
+    await req.user.save();
+    if (isDebugging) { console.log(`sending 200 from logout controller of user : ${req.user.username}`); }
+    res
+        .status(200)
+        .clearCookie("accessToken", secureCookieOptions)
+        .clearCookie("refreshToken", secureCookieOptions)
+        .json(
+            new ApiResponse(200, {}, "logged out successfully")
+        );
+}
+);
+
+
+    const refreshAccessToken = asyncHandler(async (req, res) => {
+    if (isDebugging) { console.log("started refresh Access Token controller"); }
+
+    const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+    
+    if (isDebugging) { console.log(`got token from cookies : ${incomingRefreshToken}`); }
+    
+    if (!incomingRefreshToken) { throw new ApiError(401, "Unauthorized user"); }
+    
+    const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+    
+    if (isDebugging) { console.log(`refresh token decoded : ${decodedToken}`); }
+    
+    if (!decodedToken) { throw new ApiError(401, "Invalid token"); }
+
+    const user = await User.findById(decodedToken._id);
+    if (!user) { throw new ApiError(401, "Invalid token or expired token"); }
+
+    if (isDebugging) { console.log(`db refresh token  : ${user.refreshToken}`); }
+    
+    if (user.refreshToken !== incomingRefreshToken) { throw new ApiError("Invalid token or expired"); }
+    
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user);
+    
+    if (isDebugging) { console.log(`newsly generated tokens : ${(accessToken, refreshToken)}`); }
+    if (isDebugging) { console.log("ended refresh Access Token controller sending 200 response"); }
+    
+    res.
+        status(200)
+        .cookie("accessToken", accessToken, secureCookieOptions)
+        .cookie("refreshToken", refreshToken, secureCookieOptions)
+        .json(new ApiResponse(200, { accessToken, refreshToken }, "successfully generated new tokens"));
+    });
+ 
+
+
+
+
+export {
+    registerUser,
+    loginUser,
+    logoutUser,
+    refreshAccessToken
+}

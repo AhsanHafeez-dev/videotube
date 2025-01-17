@@ -11,7 +11,7 @@ cloudinary.config({
 const uploadToCloudinary = asyncHandler(
   async (filePath) => {
     const response = await cloudinary.uploader.upload(filePath, { resource_type: "auto" });
-    if(isDebugging){console.log(`successfully uploaded image to cloudinary on url : ${response.url},now deleting from local storage`);}
+    if(isDebugging){console.log(`successfully uploaded image to cloudinary on url : ${response?.url||'no url because your file is not there'},now deleting from local storage`);}
     fs.unlinkSync(filePath);
     return response;
     
