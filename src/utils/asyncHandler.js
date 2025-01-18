@@ -1,3 +1,5 @@
+import { httpCodes } from "../constants.js";
+
 export const asyncHandler = (fn) => async (req, res, next) => {
     try {
         return await fn(req, res, next);
@@ -10,7 +12,7 @@ export const asyncHandler = (fn) => async (req, res, next) => {
             message:error.message
             })
         }
-        res.status(500 ).json({
+        res.status(httpCodes.serverSideError ).json({
           success: false,
           message: error.message,
         });
